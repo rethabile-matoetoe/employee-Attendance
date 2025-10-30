@@ -1,67 +1,120 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const mysql = require('mysql2');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// MySQL Database setup for Railway
-const db = mysql.createConnection({
-  host: process.env.DB_HOST || 'shuttle.proxy.rlwy.net',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || 'KpYuAiuFSTntCjVrGXsOoGfgGXpFkwLe',
-  database: process.env.DB_NAME || 'railway',
-  port: process.env.DB_PORT || 56296
-});
+// Database setup - Use MySQL on Railway, SQLite locally
+let db;
+if (process.env.NODE_ENV === 'production' && process.env.DB_HOST) {
+  // Production - MySQL on Railway
+  const mysql = require('mysql2');
+  console.log('🔗 Connecting to MySQL on Railway...');
+  
+  db = mysql.createConnection({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT
+  });
 
-// Connect to MySQL
-db.connect((err) => {
-  if (err) {
-    console.error('❌ Error connecting to MySQL:', err.message);
-    console.log('Retrying connection in 5 seconds...');
-    setTimeout(() => {
-      db.connect();
-    }, 5000);
-  } else {
-    console.log('✅ Connected to MySQL database on Railway');
-    initializeDatabase();
-  }
-});
-
-function initializeDatabase() {
-  const createTableSQL = `
-    CREATE TABLE IF NOT EXISTS Attendance (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      employeeName VARCHAR(255) NOT NULL,
-      employeeID VARCHAR(100) NOT NULL,
-      date VARCHAR(100) NOT NULL,
-      status VARCHAR(50) NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-
-  db.query(createTableSQL, (err) => {
+  db.connect((err) => {
     if (err) {
-      console.error('❌ Error creating table:', err.message);
+      console.error('❌ MySQL Connection Error:', err.message);
     } else {
-      console.log('✅ Attendance table ready');
-      insertSampleData();
+      console.log('✅ Connected to MySQL database on Railway');
+      initializeDatabase();
     }
   });
+} else {
+  // Development - SQLite locally
+  const sqlite3 = require('sqlite3').verbose();
+  const dbPath = path.join(__dirname, 'attendance.db');
+  console.log('🔗 Connecting to SQLite locally...');
+  
+  db = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+      console.error('❌ SQLite Connection Error:', err.message);
+    } else {
+      console.log('✅ Connected to SQLite database locally');
+      initializeDatabase();
+    }
+  });
+}
+
+function initializeDatabase() {
+  let createTableSQL;
+  
+  if (process.env.NODE_ENV === 'production' && process.env.DB_HOST) {
+    // MySQL table
+    createTableSQL = `
+      CREATE TABLE IF NOT EXISTS Attendance (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employeeName VARCHAR(255) NOT NULL,
+        employeeID VARCHAR(100) NOT NULL,
+        date VARCHAR(100) NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+  } else {
+    // SQLite table
+    createTableSQL = `
+      CREATE TABLE IF NOT EXISTS Attendance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employeeName TEXT NOT NULL,
+        employeeID TEXT NOT NULL,
+        date TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+  }
+
+  // Use appropriate query method based on database type
+  if (typeof db.run === 'function') {
+    // SQLite
+    db.run(createTableSQL, (err) => {
+      if (err) {
+        console.error('❌ Error creating table:', err.message);
+      } else {
+        console.log('✅ Attendance table ready');
+        insertSampleData();
+      }
+    });
+  } else {
+    // MySQL
+    db.query(createTableSQL, (err) => {
+      if (err) {
+        console.error('❌ Error creating table:', err.message);
+      } else {
+        console.log('✅ Attendance table ready');
+        insertSampleData();
+      }
+    });
+  }
 }
 
 function insertSampleData() {
   const checkSQL = "SELECT COUNT(*) as count FROM Attendance";
   
-  db.query(checkSQL, (err, results) => {
+  const handleResults = (err, results) => {
     if (err) {
       console.error('Error checking table:', err.message);
       return;
     }
     
-    const rowCount = results[0].count;
+    let rowCount;
+    if (Array.isArray(results)) {
+      // MySQL results
+      rowCount = results[0].count;
+    } else {
+      // SQLite results
+      rowCount = results.count;
+    }
     
     if (rowCount === 0) {
       console.log('📝 Inserting sample data...');
@@ -71,20 +124,30 @@ function insertSampleData() {
         ['Mike Wilson', 'EMP003', '2024-01-15', 'Absent']
       ];
 
-      const insertSQL = `INSERT INTO Attendance (employeeName, employeeID, date, status) VALUES ?`;
-      
-      db.query(insertSQL, [sampleData], (err) => {
-        if (err) {
-          console.error('Error inserting sample data:', err.message);
-        } else {
-          console.log('✅ Sample data inserted');
-        }
-      });
+      if (typeof db.run === 'function') {
+        // SQLite insert
+        const insertSQL = `INSERT INTO Attendance (employeeName, employeeID, date, status) VALUES (?, ?, ?, ?)`;
+        sampleData.forEach(employee => {
+          db.run(insertSQL, employee);
+        });
+      } else {
+        // MySQL insert
+        const insertSQL = `INSERT INTO Attendance (employeeName, employeeID, date, status) VALUES ?`;
+        db.query(insertSQL, [sampleData]);
+      }
+      console.log('✅ Sample data inserted');
     }
-  });
+  };
+
+  // Use appropriate query method
+  if (typeof db.run === 'function') {
+    db.get(checkSQL, handleResults);
+  } else {
+    db.query(checkSQL, handleResults);
+  }
 }
 
-// CORS configuration for production
+// CORS configuration
 const corsOptions = {
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
@@ -93,7 +156,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// API Routes - Updated for MySQL
+// Unified API Routes that work with both SQLite and MySQL
 app.post('/api/attendance', (req, res) => {
   const { employeeName, employeeID, date, status } = req.body;
   
@@ -102,12 +165,20 @@ app.post('/api/attendance', (req, res) => {
   }
 
   const sql = `INSERT INTO Attendance (employeeName, employeeID, date, status) VALUES (?, ?, ?, ?)`;
-  db.query(sql, [employeeName, employeeID, date, status], (err, result) => {
+  
+  const handleResult = (err, result) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json({ message: 'Attendance recorded successfully', id: result.insertId });
-  });
+    const id = result.insertId || result.lastID;
+    res.json({ message: 'Attendance recorded successfully', id });
+  };
+
+  if (typeof db.run === 'function') {
+    db.run(sql, [employeeName, employeeID, date, status], handleResult);
+  } else {
+    db.query(sql, [employeeName, employeeID, date, status], handleResult);
+  }
 });
 
 app.get('/api/attendance', (req, res) => {
@@ -120,36 +191,50 @@ app.get('/api/attendance', (req, res) => {
     params = [`%${search}%`, `%${search}%`];
   }
 
-  db.query(sql, params, (err, results) => {
+  const handleResults = (err, results) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
     res.json(results);
-  });
+  };
+
+  if (typeof db.run === 'function') {
+    db.all(sql, params, handleResults);
+  } else {
+    db.query(sql, params, handleResults);
+  }
 });
 
 app.delete('/api/attendance/:id', (req, res) => {
   const { id } = req.params;
   const sql = 'DELETE FROM Attendance WHERE id = ?';
   
-  db.query(sql, [id], (err, result) => {
+  const handleResult = (err, result) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    if (result.affectedRows === 0) {
+    const changes = result.affectedRows || result.changes;
+    if (changes === 0) {
       return res.status(404).json({ error: 'Record not found' });
     }
     res.json({ message: 'Record deleted successfully' });
-  });
+  };
+
+  if (typeof db.run === 'function') {
+    db.run(sql, [id], handleResult);
+  } else {
+    db.query(sql, [id], handleResult);
+  }
 });
 
 // Health check
 app.get('/api/health', (req, res) => {
+  const dbType = (process.env.NODE_ENV === 'production' && process.env.DB_HOST) ? 'MySQL (Railway)' : 'SQLite (Local)';
   res.json({ 
     status: 'OK', 
-    message: 'Server is running on Railway with MySQL',
-    timestamp: new Date().toISOString(),
-    database: 'MySQL'
+    message: 'Server is running',
+    database: dbType,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -162,14 +247,8 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.listen(PORT, '0.0.0.0', () => {
+  const dbType = (process.env.NODE_ENV === 'production' && process.env.DB_HOST) ? 'MySQL on Railway' : 'SQLite locally';
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🗄️ Database: MySQL on Railway`);
-});
-
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-  console.log('Shutting down gracefully...');
-  db.end();
-  process.exit(0);
+  console.log(`🗄️ Database: ${dbType}`);
 });
