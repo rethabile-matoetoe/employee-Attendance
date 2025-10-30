@@ -1,19 +1,31 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const mysql = require('mysql2');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Database setup (SQLite for Railway)
-const sqlite3 = require('sqlite3').verbose();
-const dbPath = process.env.DATABASE_URL || path.join(__dirname, 'attendance.db');
-const db = new sqlite3.Database(dbPath, (err) => {
+// MySQL Database setup for Railway
+const db = mysql.createConnection({
+  host: process.env.DB_HOST || 'shuttle.proxy.rlwy.net',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || 'KpYuAiuFSTntCjVrGXsOoGfgGXpFkwLe',
+  database: process.env.DB_NAME || 'railway',
+  port: process.env.DB_PORT || 56296
+});
+
+// Connect to MySQL
+db.connect((err) => {
   if (err) {
-    console.error('Error opening database:', err.message);
+    console.error('❌ Error connecting to MySQL:', err.message);
+    console.log('Retrying connection in 5 seconds...');
+    setTimeout(() => {
+      db.connect();
+    }, 5000);
   } else {
-    console.log('✅ Connected to SQLite database');
+    console.log('✅ Connected to MySQL database on Railway');
     initializeDatabase();
   }
 });
@@ -21,16 +33,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
 function initializeDatabase() {
   const createTableSQL = `
     CREATE TABLE IF NOT EXISTS Attendance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      employeeName TEXT NOT NULL,
-      employeeID TEXT NOT NULL,
-      date TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      employeeName VARCHAR(255) NOT NULL,
+      employeeID VARCHAR(100) NOT NULL,
+      date VARCHAR(100) NOT NULL,
+      status VARCHAR(50) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `;
 
-  db.run(createTableSQL, (err) => {
+  db.query(createTableSQL, (err) => {
     if (err) {
       console.error('❌ Error creating table:', err.message);
     } else {
@@ -41,8 +53,17 @@ function initializeDatabase() {
 }
 
 function insertSampleData() {
-  db.get("SELECT COUNT(*) as count FROM Attendance", (err, row) => {
-    if (!err && row.count === 0) {
+  const checkSQL = "SELECT COUNT(*) as count FROM Attendance";
+  
+  db.query(checkSQL, (err, results) => {
+    if (err) {
+      console.error('Error checking table:', err.message);
+      return;
+    }
+    
+    const rowCount = results[0].count;
+    
+    if (rowCount === 0) {
       console.log('📝 Inserting sample data...');
       const sampleData = [
         ['John Smith', 'EMP001', '2024-01-15', 'Present'],
@@ -50,11 +71,15 @@ function insertSampleData() {
         ['Mike Wilson', 'EMP003', '2024-01-15', 'Absent']
       ];
 
-      const insertSQL = `INSERT INTO Attendance (employeeName, employeeID, date, status) VALUES (?, ?, ?, ?)`;
-      sampleData.forEach(employee => {
-        db.run(insertSQL, employee);
+      const insertSQL = `INSERT INTO Attendance (employeeName, employeeID, date, status) VALUES ?`;
+      
+      db.query(insertSQL, [sampleData], (err) => {
+        if (err) {
+          console.error('Error inserting sample data:', err.message);
+        } else {
+          console.log('✅ Sample data inserted');
+        }
       });
-      console.log('✅ Sample data inserted');
     }
   });
 }
@@ -68,7 +93,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// API Routes
+// API Routes - Updated for MySQL
 app.post('/api/attendance', (req, res) => {
   const { employeeName, employeeID, date, status } = req.body;
   
@@ -77,11 +102,11 @@ app.post('/api/attendance', (req, res) => {
   }
 
   const sql = `INSERT INTO Attendance (employeeName, employeeID, date, status) VALUES (?, ?, ?, ?)`;
-  db.run(sql, [employeeName, employeeID, date, status], function(err) {
+  db.query(sql, [employeeName, employeeID, date, status], (err, result) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json({ message: 'Attendance recorded successfully', id: this.lastID });
+    res.json({ message: 'Attendance recorded successfully', id: result.insertId });
   });
 });
 
@@ -95,21 +120,23 @@ app.get('/api/attendance', (req, res) => {
     params = [`%${search}%`, `%${search}%`];
   }
 
-  db.all(sql, params, (err, rows) => {
+  db.query(sql, params, (err, results) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json(rows);
+    res.json(results);
   });
 });
 
 app.delete('/api/attendance/:id', (req, res) => {
   const { id } = req.params;
-  db.run('DELETE FROM Attendance WHERE id = ?', id, function(err) {
+  const sql = 'DELETE FROM Attendance WHERE id = ?';
+  
+  db.query(sql, [id], (err, result) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    if (this.changes === 0) {
+    if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Record not found' });
     }
     res.json({ message: 'Record deleted successfully' });
@@ -120,8 +147,9 @@ app.delete('/api/attendance/:id', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Server is running on Railway',
-    timestamp: new Date().toISOString()
+    message: 'Server is running on Railway with MySQL',
+    timestamp: new Date().toISOString(),
+    database: 'MySQL'
   });
 });
 
@@ -136,4 +164,12 @@ if (process.env.NODE_ENV === 'production') {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🗄️ Database: MySQL on Railway`);
+});
+
+// Handle graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Shutting down gracefully...');
+  db.end();
+  process.exit(0);
 });
