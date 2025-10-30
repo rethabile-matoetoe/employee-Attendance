@@ -13,8 +13,8 @@ function AttendanceForm({ onAttendanceAdded }) {
   const [showSuccess, setShowSuccess] = useState(false)
   const [errors, setErrors] = useState({})
 
-  // Get API base URL from environment or use default
-  const API_BASE_URL = window.API_BASE_URL || 'http://localhost:5000/api';
+  // FIXED: Direct API URL
+  const API_BASE_URL = 'http://localhost:5000/api';
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -89,7 +89,6 @@ function AttendanceForm({ onAttendanceAdded }) {
       setTimeout(() => setShowSuccess(false), 3000)
       
       // Reset form but keep the selected date for convenience
-      // (user might want to record multiple entries for the same date)
       setFormData({
         employeeName: '',
         employeeID: '',
@@ -161,7 +160,7 @@ function AttendanceForm({ onAttendanceAdded }) {
       {/* Success Message */}
       {showSuccess && (
         <div className="success-message bounce-in">
-          <span className="success-icon">✓</span>
+          <span className="success-icon"></span>
           Attendance recorded successfully!
         </div>
       )}

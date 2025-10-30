@@ -6,6 +6,15 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// CORS configuration - FIXED
+app.use(cors({
+  origin: ["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000", "http://127.0.0.1:3001"],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+}));
+
+app.use(express.json());
+
 // Database setup - Use MySQL on Railway, SQLite locally
 let db;
 if (process.env.NODE_ENV === 'production' && process.env.DB_HOST) {
@@ -147,15 +156,6 @@ function insertSampleData() {
   }
 }
 
-// CORS configuration
-const corsOptions = {
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
-  credentials: true
-};
-
-app.use(cors(corsOptions));
-app.use(express.json());
-
 // Unified API Routes that work with both SQLite and MySQL
 app.post('/api/attendance', (req, res) => {
   const { employeeName, employeeID, date, status } = req.body;
@@ -202,6 +202,33 @@ app.get('/api/attendance', (req, res) => {
     db.all(sql, params, handleResults);
   } else {
     db.query(sql, params, handleResults);
+  }
+});
+
+// ADDED: Search route that was missing
+app.get('/api/attendance/search', (req, res) => {
+  const { query } = req.query;
+  
+  if (!query) {
+    return res.status(400).json({ error: 'Search query required' });
+  }
+  
+  const sql = `SELECT * FROM Attendance 
+               WHERE employeeName LIKE ? OR employeeID LIKE ? 
+               ORDER BY date DESC`;
+  const searchTerm = `%${query}%`;
+  
+  const handleResults = (err, results) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    res.json(results);
+  };
+
+  if (typeof db.run === 'function') {
+    db.all(sql, [searchTerm, searchTerm], handleResults);
+  } else {
+    db.query(sql, [searchTerm, searchTerm], handleResults);
   }
 });
 

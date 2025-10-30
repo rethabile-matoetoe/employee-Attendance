@@ -12,8 +12,8 @@ function AttendanceDashboard({ refresh }) {
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(null)
 
-  // Get API base URL from environment or use default
-  const API_BASE_URL = window.API_BASE_URL || 'http://localhost:5000/api';
+  // FIXED: Direct API URL
+  const API_BASE_URL = 'http://localhost:5000/api';
 
   useEffect(() => {
     fetchRecords()
@@ -211,7 +211,7 @@ function AttendanceDashboard({ refresh }) {
           </button>
 
           <button onClick={fetchRecords} className="refresh-btn">
-             Refresh
+            Refresh
           </button>
         </div>
       </div>
@@ -258,14 +258,14 @@ function AttendanceDashboard({ refresh }) {
             <thead>
               <tr>
                 <th onClick={() => handleSort('name')} className="sortable">
-                  Employee Name {getSortIcon('name')}
+                   {('name')}
                 </th>
                 <th>Employee ID</th>
                 <th onClick={() => handleSort('date')} className="sortable">
-                  Date {getSortIcon('date')}
+                  {('date')}
                 </th>
                 <th onClick={() => handleSort('status')} className="sortable">
-                  Status {getSortIcon('status')}
+                   {('status')}
                 </th>
                 <th>Actions</th>
               </tr>
